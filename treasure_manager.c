@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <time.h>
 
-// Structu pentru date
+// Structul pentru date
 typedef struct 
 {
     int id;
@@ -18,7 +18,7 @@ typedef struct
     int value;
 } Treasure;
 
-// Citire de la tastatura farra scanf
+// Citire de la tastatura fara scanf
 void read_input(char *buffer, size_t max_len) 
 {
     int i = 0;
@@ -47,7 +47,7 @@ void add(const char *hunt_id)
     
     if (mkdir(dir_path, 0777) == -1 && errno != EEXIST) 
     {
-        write_msg("Eroare la crearea directorului\n");
+        write_msg("Erorr at directory opening\n");
         exit(-1);
     }
 
@@ -55,7 +55,7 @@ void add(const char *hunt_id)
     int fd = open(file_path, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (fd == -1) 
     {
-        write_msg("Eroare la deschiderea fișierului\n");
+        write_msg("Erorr at file opening\n");
         exit(-1);
     }
 
@@ -65,21 +65,21 @@ void add(const char *hunt_id)
     read_input(input, sizeof(input));
     t.id = atoi(input);
 
-    write_msg("Nume comoară: ");
+    write_msg("Treasure name: ");
     read_input(t.name, sizeof(t.name));
 
-    write_msg("Latitudine: ");
+    write_msg("Latitude: ");
     read_input(input, sizeof(input));
     t.latitude = atof(input);
 
-    write_msg("Longitudine: ");
+    write_msg("Longitude: ");
     read_input(input, sizeof(input));
     t.longitude = atof(input);
 
-    write_msg("Indiciu: ");
+    write_msg("Clue: ");
     read_input(t.clue, sizeof(t.clue));
 
-    write_msg("Valoare: ");
+    write_msg("Value: ");
     read_input(input, sizeof(input));
     t.value = atoi(input);
 
@@ -89,7 +89,7 @@ void add(const char *hunt_id)
 
     write(fd, buffer, len);
     close(fd);
-    write_msg("Comoară adăugată cu succes.\n");
+    write_msg("Successfully added treasure.\n");
 }
 
 // Functia de listare a hunt-ului (id, size, ultima modificare si treasure)
@@ -101,35 +101,35 @@ void list(const char *hunt_id)
     struct stat st;
     if (stat(file, &st) == -1) 
     {
-        write_msg("Id gresit\n");
-        return;
+        write_msg("Wrong id.\n");
+        exit(-1);
     }
 
     // Afisare nume hunt
-    write_msg("Hunt: ");
+    write_msg("Name: ");
     write_msg(hunt_id);
     write_msg("\n");
 
     // Afisare size fisier
     char buf[256];
-    snprintf(buf, sizeof(buf), "Dimensiune fișier: %ld bytes\n", st.st_size);
+    snprintf(buf, sizeof(buf), "File size: %ld bytes\n", st.st_size);
     write_msg(buf);
 
     // Afisare ultima modificare
     char timebuf[64];
     struct tm *tm_info = localtime(&st.st_mtime);
-    strftime(timebuf, sizeof(timebuf), "Ultima modificare: %Y-%m-%d %H:%M:%S\n", tm_info);
+    strftime(timebuf, sizeof(timebuf), "Last modify: %Y-%m-%d %H:%M:%S\n", tm_info);
     write_msg(timebuf);
 
     // Citire si afisare treasures
     int fd = open(file, O_RDONLY);
     if (fd == -1) 
     {
-        write_msg("Eroare la deschiderea fișierului\n");
-        return;
+        write_msg("Erorr at file opening\n");
+        exit(-1);
     }
 
-    write_msg("Treasures: \n");
+    write_msg("Treasures:\n");
     char line[2048];
     int idx = 0;
     char ch;
@@ -166,7 +166,7 @@ void list(const char *hunt_id)
                 // Afișăm informațiile despre comoară
                 char treasure_msg[2048];
                 snprintf(treasure_msg, sizeof(treasure_msg),
-                         "\nID: %d\nNume: %s\nLatitudine: %.3f, Longitudine: %.3f\nIndiciu: %s\nValoare: %d\n",
+                         "\nID: %d\nName: %s\nLatitude: %.3f, Longitude: %.3f\nClue: %s\nValue: %d\n",
                          t_id, t_name, t_lat, t_long, t_clue, t_value);
                 write_msg(treasure_msg);
             }
@@ -181,12 +181,84 @@ void list(const char *hunt_id)
     close(fd);
 }
 
+void view(const char *hunt_id, const char* id)
+{
+    char file[512];
+    snprintf(file, sizeof(file), "./%s/treasure.txt", hunt_id);
+
+    int fd = open(file, O_RDONLY);
+    if (fd == -1) 
+    {
+        write_msg("Erorr at file opening\n");
+        exit(-1);
+    }
+
+    char line[2048];
+    int idx = 0;
+    char ch;
+    int ok=0;
+    while (read(fd, &ch, 1) > 0) 
+    {
+        if (ch == '\n' || idx >= sizeof(line) - 1) 
+        {
+            line[idx] = '\0';
+            if (strlen(line) > 0) 
+            {
+                int t_id, t_value;
+                char t_name[32], t_clue[1028];
+                float t_lat, t_long;
+
+                // Extragem informațiile manual, fără scanf
+                char *token = strtok(line, ",");
+                t_id = atoi(token);
+
+                token = strtok(NULL, ",");
+                strncpy(t_name, token, sizeof(t_name));
+
+                token = strtok(NULL, ",");
+                t_lat = atof(token);
+
+                token = strtok(NULL, ",");
+                t_long = atof(token);
+
+                token = strtok(NULL, ",");
+                strncpy(t_clue, token, sizeof(t_clue));
+
+                token = strtok(NULL, ",");
+                t_value = atoi(token);
+
+                if(t_id==atoi(id))
+                {
+                    char treasure_msg[2048];
+                    snprintf(treasure_msg, sizeof(treasure_msg),
+                            "ID: %d\nName: %s\nLatitude: %.3f, Longitude: %.3f\nClue: %s\nValue: %d\n",
+                            t_id, t_name, t_lat, t_long, t_clue, t_value);
+                    write_msg(treasure_msg);
+                    ok=1;
+                    break;
+                }
+            }
+            idx = 0;
+        } 
+        else 
+        {
+            line[idx++] = ch;
+        }
+    }
+    if(ok==0)
+    {
+        write_msg("ID doesn't exist.\n");
+    }
+    
+    close(fd);
+}
+
 int main(int argc, char *argv[]) 
 {
     if (argc < 3) 
     {
-        write_msg("Prea putine argumente.\n");
-        return 1;
+        write_msg("To few arguments.\n");
+        return -1;
     }
 
     // Alegerea optiunii
@@ -198,9 +270,13 @@ int main(int argc, char *argv[])
     {
         list(argv[2]);
     }
+    else if(strcmp(argv[1], "view")==0)
+    {
+        view(argv[2], argv[3]);
+    }
     else
     {
-        write_msg("Comanda gresita.\n");
+        write_msg("Wrong comand.\n");
     }
 
     return 0;
