@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
+#include <dirent.h>
 
 // Structul pentru date
 typedef struct 
@@ -253,6 +254,147 @@ void view(const char *hunt_id, const char* id)
     close(fd);
 }
 
+void remove_treasure(const char *hunt_id, const char *id)
+{
+    char file[512];
+    snprintf(file, sizeof(file), "./%s/treasure.txt", hunt_id);
+
+    int fd = open(file, O_RDONLY);
+    if (fd == -1) 
+    {
+        write_msg("Error at file opening\n");
+        exit(-1);
+    }
+
+    char buffer[4096];
+    int bytes_read = read(fd, buffer, sizeof(buffer));
+    if (bytes_read == -1) 
+    {
+        write_msg("Error reading file\n");
+        close(fd);
+        exit(-1);
+    }
+    close(fd);
+
+    // Process the buffer to remove the treasure with the given id
+    char temp_file[512];
+    snprintf(temp_file, sizeof(temp_file), "./%s/treasure_temp.txt", hunt_id);
+
+    int temp_fd = open(temp_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (temp_fd == -1)
+    {
+        write_msg("Error opening temporary file\n");
+        exit(-1);
+    }
+
+    int ok=0;
+    char line[2048];
+    int idx = 0;
+    for (int i = 0; i < bytes_read; i++) 
+    {
+        char ch = buffer[i];
+        
+        if (ch == '\n' || idx >= sizeof(line) - 1) 
+        {
+            line[idx] = '\0';
+            if (strlen(line) > 0) 
+            {
+                int t_id, t_value;
+                char t_name[32], t_clue[1028];
+                float t_lat, t_long;
+
+                char *token = strtok(line, ",");
+                t_id = atoi(token);
+
+                token = strtok(NULL, ",");
+                strncpy(t_name, token, sizeof(t_name));
+
+                token = strtok(NULL, ",");
+                t_lat = atof(token);
+
+                token = strtok(NULL, ",");
+                t_long = atof(token);
+
+                token = strtok(NULL, ",");
+                strncpy(t_clue, token, sizeof(t_clue));
+
+                token = strtok(NULL, ",");
+                t_value = atoi(token);
+
+                // Only write back lines that don't match the id
+                if (t_id != atoi(id))
+                {
+                    snprintf(buffer, sizeof(buffer),
+                             "%d,%s,%.3f,%.3f,%s,%d\n",
+                             t_id, t_name, t_lat, t_long, t_clue, t_value);
+                    write(temp_fd, buffer, strlen(buffer));
+                }
+                else
+                {
+                    ok=1;
+                }
+            }
+            idx = 0;
+        } 
+        else 
+        {
+            line[idx++] = ch;
+        }
+    }
+
+    close(temp_fd);
+
+    // Replace the old file with the updated one
+    if (remove(file) != 0)
+    {
+        write_msg("Error removing old file\n");
+        exit(-1);
+    }
+
+    if (rename(temp_file, file) != 0)
+    {
+        write_msg("Error renaming temporary file\n");
+        exit(-1);
+    }
+
+    if(ok==1)
+    {
+        write_msg("Successfully removed treasure.\n");
+    }
+    else
+    {
+        write_msg("Id doesn't exist, so no treasure was deleted.\n");
+    }
+}
+
+
+void remove_hunt(const char *hunt_id)
+{
+    char dir[256];
+    snprintf(dir,sizeof(dir),"./%s", hunt_id);
+    struct stat st;
+    if(stat(dir, &st)==-1 || !S_ISDIR(st.st_mode))
+    {
+        write_msg("Hunt does not exist.\n");
+        exit(-1);
+    }
+    char file[512];
+    snprintf(file,sizeof(file), "%s/treasure.txt", dir);
+    if(remove(file)==-1)
+    {
+        write_msg("Error removing treasure file.\n");
+        exit(-1);
+    }
+    if(rmdir(dir)==-1)
+    {
+        write_msg("Error removing hunt directory.\n");
+    }
+    else
+    {
+        write_msg("Hunt removed successfully.\n");
+    }
+}
+
 int main(int argc, char *argv[]) 
 {
     if (argc < 3) 
@@ -273,6 +415,14 @@ int main(int argc, char *argv[])
     else if(strcmp(argv[1], "view")==0)
     {
         view(argv[2], argv[3]);
+    }
+    else if (strcmp(argv[1], "remove_treasure")==0)
+    {
+        remove_treasure(argv[2], argv[3]);
+    }
+    else if (strcmp(argv[1], "remove_hunt")==0)
+    {
+        remove_hunt(argv[2]);
     }
     else
     {
