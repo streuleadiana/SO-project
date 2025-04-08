@@ -287,7 +287,6 @@ void remove_treasure(const char *hunt_id, const char *id)
         exit(-1);
     }
 
-    int ok=0;
     char line[2048];
     int idx = 0;
     for (int i = 0; i < bytes_read; i++) 
@@ -324,14 +323,9 @@ void remove_treasure(const char *hunt_id, const char *id)
                 // Only write back lines that don't match the id
                 if (t_id != atoi(id))
                 {
-                    snprintf(buffer, sizeof(buffer),
-                             "%d,%s,%.3f,%.3f,%s,%d\n",
-                             t_id, t_name, t_lat, t_long, t_clue, t_value);
-                    write(temp_fd, buffer, strlen(buffer));
-                }
-                else
-                {
-                    ok=1;
+                    char aux[2048];
+                    snprintf(aux, sizeof(aux),"%d,%s,%.3f,%.3f,%s,%d\n",t_id, t_name, t_lat, t_long, t_clue, t_value);
+                    write(temp_fd, aux, strlen(aux));
                 }
             }
             idx = 0;
@@ -357,16 +351,9 @@ void remove_treasure(const char *hunt_id, const char *id)
         exit(-1);
     }
 
-    if(ok==1)
-    {
-        write_msg("Successfully removed treasure.\n");
-    }
-    else
-    {
-        write_msg("Id doesn't exist, so no treasure was deleted.\n");
-    }
+    write_msg("Successfully removed treasure.\n");
+    
 }
-
 
 void remove_hunt(const char *hunt_id)
 {
