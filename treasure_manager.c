@@ -7,8 +7,13 @@
 #include <errno.h>
 #include <time.h>
 #include <dirent.h>
+#include <sys/types.h>
 
-// Structul pentru date
+// File names for treasure data and log
+#define TREASURE_FILE "treasures.bin"
+#define LOG_FILE "logged_hunt"
+
+// Structure to store treasure information
 typedef struct 
 {
     int id;
@@ -19,7 +24,8 @@ typedef struct
     int value;
 } Treasure;
 
-// Citire de la tastatura fara scanf
+// Reads input from stdin into buffer, up to max_len, until newline
+// Without scanf
 void read_input(char *buffer, size_t max_len) 
 {
     int i = 0;
@@ -31,30 +37,68 @@ void read_input(char *buffer, size_t max_len)
     buffer[i] = '\0';
 }
 
-// Afisare la tastatura fara printf
-void write_msg(const char *msg)
+// Writes a message to stdout
+// Without printf
+void write_msg(const char *msg) 
 {
     write(1, msg, strlen(msg));
 }
 
-// Functia de adaugare a unui treasure in hunt-ul specificat
+// Logs an action with timestamp to the hunt's log file
+void log_action(const char *hunt_id, const char *action) 
+{
+    char log_path[512];
+    // Construct path to log file
+    snprintf(log_path, sizeof(log_path), "%s/%s", hunt_id, LOG_FILE);
+
+    // Open log file in append mode, create if it doesn't exist
+    int fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0777);
+    if (fd == -1) 
+        exit(-1);
+
+    // Get current time
+    time_t now = time(NULL);
+    char time_buf[64];
+    strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+
+    char log_entry[1024];
+    snprintf(log_entry, sizeof(log_entry), "[%s] %s\n", time_buf, action);
+    write(fd, log_entry, strlen(log_entry));
+    close(fd);
+}
+
+// Creates a symbolic link to the hunt's log file
+void create_symlink(const char *hunt_id) 
+{
+    char link_name[256];
+    // Name of the symbolic link
+    snprintf(link_name, sizeof(link_name), "logged_hunt-%s", hunt_id);
+    char target[512];
+    snprintf(target, sizeof(target), "%s/%s", hunt_id, LOG_FILE);
+    symlink(target, link_name);
+}
+// Adds a new treasure to the hunt
 void add(const char *hunt_id) 
 {
     char dir_path[256];
     char file_path[512];
     char input[1050];
 
+    // Create directory path for the hunt
     snprintf(dir_path, sizeof(dir_path), "./%s", hunt_id);
     
+    // Create directory if it doesn't exist
     if (mkdir(dir_path, 0777) == -1 && errno != EEXIST) 
     {
         write_msg("Erorr at directory opening\n");
         exit(-1);
     }
 
-    snprintf(file_path, sizeof(file_path), "%s/treasure.txt", dir_path);
-    int fd = open(file_path, O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (fd == -1) 
+    // Path to treasure file
+    snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, TREASURE_FILE);
+    // Open treasure file in append mode
+    int fd = open(file_path, O_WRONLY | O_CREAT | O_APPEND, 0777);
+    if (fd == -1)
     {
         write_msg("Erorr at file opening\n");
         exit(-1);
@@ -62,11 +106,12 @@ void add(const char *hunt_id)
 
     Treasure t;
 
+    // Read treasure details from user
     write_msg("ID: ");
     read_input(input, sizeof(input));
     t.id = atoi(input);
 
-    write_msg("Treasure name: ");
+    write_msg("Name: ");
     read_input(t.name, sizeof(t.name));
 
     write_msg("Latitude: ");
@@ -84,313 +129,205 @@ void add(const char *hunt_id)
     read_input(input, sizeof(input));
     t.value = atoi(input);
 
-    char buffer[2048];
-    int len = snprintf(buffer, sizeof(buffer), "%d,%s,%.3f,%.3f,%s,%d,\n",
-                       t.id, t.name, t.latitude, t.longitude, t.clue, t.value);
-
-    write(fd, buffer, len);
+    // Write treasure to file
+    write(fd, &t, sizeof(Treasure));
     close(fd);
+
+    // Log the action and create symlink
+    log_action(hunt_id, "Added a treasure");
+    create_symlink(hunt_id);
     write_msg("Successfully added treasure.\n");
 }
 
-// Functia de listare a hunt-ului (id, size, ultima modificare si treasure)
-void list(const char *hunt_id)
+// Lists all treasures in the hunt
+void list(const char *hunt_id) 
 {
-    char file[512];
-    snprintf(file, sizeof(file), "./%s/treasure.txt", hunt_id);
+    char file_path[512];
+    // Path to treasure file
+    snprintf(file_path, sizeof(file_path), "%s/%s", hunt_id, TREASURE_FILE);
 
     struct stat st;
-    if (stat(file, &st) == -1) 
+    // Check if treasure file exists
+    if (stat(file_path, &st) == -1) 
     {
         write_msg("Wrong id.\n");
         exit(-1);
     }
 
-    // Afisare nume hunt
-    write_msg("Name: ");
-    write_msg(hunt_id);
-    write_msg("\n");
+    // Display hunt info
+    char msg[2048];
+    snprintf(msg, sizeof(msg), "Hunt: %s\nSize: %ld bytes\n", hunt_id, st.st_size);
+    write_msg(msg);
 
-    // Afisare size fisier
-    char buf[256];
-    snprintf(buf, sizeof(buf), "File size: %ld bytes\n", st.st_size);
-    write_msg(buf);
-
-    // Afisare ultima modificare
+    // Display last modified time
     char timebuf[64];
-    struct tm *tm_info = localtime(&st.st_mtime);
-    strftime(timebuf, sizeof(timebuf), "Last modify: %Y-%m-%d %H:%M:%S\n", tm_info);
+    strftime(timebuf, sizeof(timebuf), "Last modify: %Y-%m-%d %H:%M:%S\n", localtime(&st.st_mtime));
     write_msg(timebuf);
 
-    // Citire si afisare treasures
-    int fd = open(file, O_RDONLY);
+    // Open treasure file for reading
+    int fd = open(file_path, O_RDONLY);
     if (fd == -1) 
     {
         write_msg("Erorr at file opening\n");
         exit(-1);
     }
 
-    write_msg("Treasures:\n");
-    char line[2048];
-    int idx = 0;
-    char ch;
-    while (read(fd, &ch, 1) > 0) 
+    Treasure t;
+    // Read and display each treasure
+    while (read(fd, &t, sizeof(Treasure)) == sizeof(Treasure)) 
     {
-        if (ch == '\n' || idx >= sizeof(line) - 1) 
-        {
-            line[idx] = '\0';
-            if (strlen(line) > 0) 
-            {
-                int t_id, t_value;
-                char t_name[32], t_clue[1028];
-                float t_lat, t_long;
-
-                // Extragem informațiile manual, fără scanf
-                char *token = strtok(line, ",");
-                t_id = atoi(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_name, token, sizeof(t_name));
-
-                token = strtok(NULL, ",");
-                t_lat = atof(token);
-
-                token = strtok(NULL, ",");
-                t_long = atof(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_clue, token, sizeof(t_clue));
-
-                token = strtok(NULL, ",");
-                t_value = atoi(token);
-
-                // Afișăm informațiile despre comoară
-                char treasure_msg[2048];
-                snprintf(treasure_msg, sizeof(treasure_msg),
-                         "\nID: %d\nName: %s\nLatitude: %.3f, Longitude: %.3f\nClue: %s\nValue: %d\n",
-                         t_id, t_name, t_lat, t_long, t_clue, t_value);
-                write_msg(treasure_msg);
-            }
-            idx = 0;
-        } 
-        else 
-        {
-            line[idx++] = ch;
-        }
+        snprintf(msg, sizeof(msg), "ID: %d\nName: %s\nLat: %.2f Long: %.2f\nClue: %s\nValue: %d\n\n", t.id, t.name, t.latitude, t.longitude, t.clue, t.value);
+        write_msg(msg);
     }
-
     close(fd);
+    log_action(hunt_id, "Listed treasures");
 }
 
-void view(const char *hunt_id, const char* id)
+// Displays a specific treasure by ID
+void view(const char *hunt_id, const char *id) 
 {
-    char file[512];
-    snprintf(file, sizeof(file), "./%s/treasure.txt", hunt_id);
+    int search_id = atoi(id);
+    char file_path[512];
+    // Path to treasure file
+    snprintf(file_path, sizeof(file_path), "%s/%s", hunt_id, TREASURE_FILE);
 
-    int fd = open(file, O_RDONLY);
+    // Open treasure file for reading
+    int fd = open(file_path, O_RDONLY);
     if (fd == -1) 
     {
         write_msg("Erorr at file opening\n");
         exit(-1);
     }
 
-    char line[2048];
-    int idx = 0;
-    char ch;
-    int ok=0;
-    while (read(fd, &ch, 1) > 0) 
+    Treasure t;
+    // Search for treasure with matching ID
+    while (read(fd, &t, sizeof(Treasure)) == sizeof(Treasure)) 
     {
-        if (ch == '\n' || idx >= sizeof(line) - 1) 
+        if (t.id == search_id) 
         {
-            line[idx] = '\0';
-            if (strlen(line) > 0) 
-            {
-                int t_id, t_value;
-                char t_name[32], t_clue[1028];
-                float t_lat, t_long;
-
-                // Extragem informațiile manual, fără scanf
-                char *token = strtok(line, ",");
-                t_id = atoi(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_name, token, sizeof(t_name));
-
-                token = strtok(NULL, ",");
-                t_lat = atof(token);
-
-                token = strtok(NULL, ",");
-                t_long = atof(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_clue, token, sizeof(t_clue));
-
-                token = strtok(NULL, ",");
-                t_value = atoi(token);
-
-                if(t_id==atoi(id))
-                {
-                    char treasure_msg[2048];
-                    snprintf(treasure_msg, sizeof(treasure_msg),
-                            "ID: %d\nName: %s\nLatitude: %.3f, Longitude: %.3f\nClue: %s\nValue: %d\n",
-                            t_id, t_name, t_lat, t_long, t_clue, t_value);
-                    write_msg(treasure_msg);
-                    ok=1;
-                    break;
-                }
-            }
-            idx = 0;
-        } 
-        else 
-        {
-            line[idx++] = ch;
+            char msg[2048];
+            snprintf(msg, sizeof(msg), "ID: %d\nName: %s\nLat: %.2f Long: %.2f\nClue: %s\nValue: %d\n", t.id, t.name, t.latitude, t.longitude, t.clue, t.value);
+            write_msg(msg);
+            break;
         }
     }
-    if(ok==0)
-    {
-        write_msg("ID doesn't exist.\n");
-    }
-    
     close(fd);
+    log_action(hunt_id, "Viewed treasure");
 }
 
-void remove_treasure(const char *hunt_id, const char *id)
+// Removes a specific treasure by ID
+void remove_treasure(const char *hunt_id, const char *id) 
 {
-    char file[512];
-    snprintf(file, sizeof(file), "./%s/treasure.txt", hunt_id);
+    int search_id = atoi(id);
+    char file_path[512], temp_path[512];
+    // Paths for treasure file and temporary file
+    snprintf(file_path, sizeof(file_path), "%s/%s", hunt_id, TREASURE_FILE);
+    snprintf(temp_path, sizeof(temp_path), "%s/temp.bin", hunt_id);
 
-    int fd = open(file, O_RDONLY);
-    if (fd == -1) 
+    // Open files for reading and writing
+    int fd = open(file_path, O_RDONLY);
+    int temp_fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd == -1 || temp_fd == -1)
     {
         write_msg("Error at file opening\n");
         exit(-1);
     }
 
-    char buffer[4096];
-    int bytes_read = read(fd, buffer, sizeof(buffer));
-    if (bytes_read == -1) 
+    Treasure t;
+    // Copy all treasures except the one to remove
+    while (read(fd, &t, sizeof(Treasure)) == sizeof(Treasure)) 
     {
-        write_msg("Error reading file\n");
-        close(fd);
-        exit(-1);
+        if (t.id != search_id) 
+            write(temp_fd, &t, sizeof(Treasure));
     }
     close(fd);
+    close(temp_fd);
+    // Replace original file with updated one
+    rename(temp_path, file_path);
 
-    // Process the buffer to remove the treasure with the given id
-    char temp_file[512];
-    snprintf(temp_file, sizeof(temp_file), "./%s/treasure_temp.txt", hunt_id);
+    log_action(hunt_id, "Removed treasure");
+    write_msg("Treasure removed.\n");
+}
 
-    int temp_fd = open(temp_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (temp_fd == -1)
-    {
-        write_msg("Error opening temporary file\n");
-        exit(-1);
-    }
+// Removes a hunt directory and preserves log via a new file
+void remove_hunt(const char *hunt_id) 
+{
+    char treasure_path[512];
+    char log_path[512];
+    char new_log_path[512];
+    char link_name[256];
 
-    char line[2048];
-    int idx = 0;
-    for (int i = 0; i < bytes_read; i++) 
-    {
-        char ch = buffer[i];
-        
-        if (ch == '\n' || idx >= sizeof(line) - 1) 
+    // Construct paths for files and symlink
+    snprintf(treasure_path, sizeof(treasure_path), "%s/%s", hunt_id, TREASURE_FILE);
+    snprintf(log_path, sizeof(log_path), "%s/%s", hunt_id, LOG_FILE);
+    snprintf(new_log_path, sizeof(new_log_path), "logged_hunt-%s.log", hunt_id);
+    snprintf(link_name, sizeof(link_name), "logged_hunt-%s", hunt_id);
+
+    // Copy log file to new location to preserve it
+    int src_fd = open(log_path, O_RDONLY);
+    if (src_fd != -1) {
+        int dst_fd = open(new_log_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (dst_fd == -1) 
         {
-            line[idx] = '\0';
-            if (strlen(line) > 0) 
-            {
-                int t_id, t_value;
-                char t_name[32], t_clue[1028];
-                float t_lat, t_long;
+            write_msg("Error copying log file.\n");
+            close(src_fd);
+            exit(-1);
+        }
 
-                char *token = strtok(line, ",");
-                t_id = atoi(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_name, token, sizeof(t_name));
-
-                token = strtok(NULL, ",");
-                t_lat = atof(token);
-
-                token = strtok(NULL, ",");
-                t_long = atof(token);
-
-                token = strtok(NULL, ",");
-                strncpy(t_clue, token, sizeof(t_clue));
-
-                token = strtok(NULL, ",");
-                t_value = atoi(token);
-
-                // Only write back lines that don't match the id
-                if (t_id != atoi(id))
-                {
-                    char aux[2048];
-                    snprintf(aux, sizeof(aux),"%d,%s,%.3f,%.3f,%s,%d\n",t_id, t_name, t_lat, t_long, t_clue, t_value);
-                    write(temp_fd, aux, strlen(aux));
-                }
-            }
-            idx = 0;
-        } 
-        else 
+        // Transfer log contents to new file
+        char buffer[1024];
+        ssize_t bytes_read;
+        while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) 
         {
-            line[idx++] = ch;
+            write(dst_fd, buffer, bytes_read);
+        }
+        close(src_fd);
+        close(dst_fd);
+
+        // Update symbolic link to point to the new log file
+        unlink(link_name); // Remove old symlink
+        if (symlink(new_log_path, link_name) == -1) 
+        {
+            write_msg("Error updating symbolic link.\n");
+            exit(-1);
         }
     }
 
-    close(temp_fd);
-
-    // Replace the old file with the updated one
-    if (remove(file) != 0)
-    {
-        write_msg("Error removing old file\n");
-        exit(-1);
-    }
-
-    if (rename(temp_file, file) != 0)
-    {
-        write_msg("Error renaming temporary file\n");
-        exit(-1);
-    }
-
-    write_msg("Successfully removed treasure.\n");
-    
-}
-
-void remove_hunt(const char *hunt_id)
-{
-    char dir[256];
-    snprintf(dir,sizeof(dir),"./%s", hunt_id);
-    struct stat st;
-    if(stat(dir, &st)==-1 || !S_ISDIR(st.st_mode))
-    {
-        write_msg("Hunt does not exist.\n");
-        exit(-1);
-    }
-    char file[512];
-    snprintf(file,sizeof(file), "%s/treasure.txt", dir);
-    if(remove(file)==-1)
+    // Remove the treasure file
+    if (remove(treasure_path) == -1 && errno != ENOENT) 
     {
         write_msg("Error removing treasure file.\n");
         exit(-1);
     }
-    if(rmdir(dir)==-1)
+
+    // Remove the log file
+    if (remove(log_path) == -1 && errno != ENOENT) 
     {
-        write_msg("Error removing hunt directory.\n");
+        write_msg("Error removing log file.\n");
+        exit(-1);
     }
-    else
+
+    // Remove the directory
+    if (rmdir(hunt_id) == -1) 
     {
-        write_msg("Hunt removed successfully.\n");
+        write_msg("Error removing directory.\n");
+        exit(-1);
     }
+
+    write_msg("Hunt removed.\n");
 }
 
+// Main function to handle command-line arguments
 int main(int argc, char *argv[]) 
 {
+    // Check for minimum required arguments
     if (argc < 3) 
     {
         write_msg("To few arguments.\n");
         return -1;
     }
 
-    // Alegerea optiunii
+    // Dispatch commandss
     if (strcmp(argv[1], "add") == 0) 
     {
         add(argv[2]);
